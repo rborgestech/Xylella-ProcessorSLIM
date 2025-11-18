@@ -43,14 +43,33 @@ def _find_header_row(df_raw: pd.DataFrame, target: str) -> int:
     raise ValueError("Não foi possível encontrar a linha de cabeçalho no ficheiro de pré-registo.")
 
 
+
+
 def _load_pre_registo_df(uploaded_file) -> pd.DataFrame:
-    """Lê o Excel de pré-registo para DataFrame, detectando a linha de cabeçalhos."""
-    df_raw = pd.read_excel(uploaded_file, sheet_name=0, header=None, dtype=object)
+    """
+    Lê o Excel de pré-registo usando openpyxl data_only=True
+    para obter os valores calculados das fórmulas.
+    Depois converte para DataFrame mantendo o cabeçalho correto.
+    """
+    wb = load_workbook(uploaded_file, data_only=True)
+    ws = wb.active
+
+    # Ler todas as linhas como listas
+    rows = list(ws.values)
+
+    df_raw = pd.DataFrame(rows)
+
+    # Encontrar a linha com o cabeçalho
     header_row = _find_header_row(df_raw, "Código_amostra (Código original / Referência amostra)")
     headers = df_raw.iloc[header_row].tolist()
+
+    # DataFrame final
     df = df_raw.iloc[header_row + 1:].copy()
     df.columns = headers
-    df = df.dropna(how="all")  # remove linhas completamente vazias
+
+    # Remover linhas totalmente vazias
+    df = df.dropna(how="all")
+
     return df
 
 
