@@ -17,49 +17,55 @@ def analyse_output_xlsx(xlsx_bytes: bytes) -> Tuple[int, List[str]]:
     """
     Analisa o ficheiro DGAV gerado:
       - Conta o nº de amostras (linhas com CODIGO_AMOSTRA)
-      - Devolve lista de warnings (colunas obrigatórias com células vazias)
+      - Devolve lista de warnings (colunas obrigatórias sem qualquer registo)
     """
     wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
     ws = wb["Default"]
 
     # Mapear cabeçalhos
-    header_indices = {}
+    header_indices: Dict[str, int] = {}
     for col in range(1, ws.max_column + 1):
         val = ws.cell(row=1, column=col).value
         if val:
             header_indices[str(val)] = col
 
-    warnings = []
-    # nº de amostras = nº de linhas com CODIGO_AMOSTRA não vazio
-    codigo_col_idx = header_indices.get("CODIGO_AMOSTRA")
+    warnings: List[str] = []
+
+    # 1) Determinar última linha de dados com base na coluna CODIGO_AMOSTRA
+    codigo_idx = header_indices.get("CODIGO_AMOSTRA")
+    last_data_row = 1
     sample_count = 0
-    if codigo_col_idx:
+
+    if codigo_idx:
         for row in range(2, ws.max_row + 1):
-            v = ws.cell(row=row, column=codigo_col_idx).value
+            v = ws.cell(row=row, column=codigo_idx).value
             if v not in (None, ""):
                 sample_count += 1
+                last_data_row = row
+    else:
+        # se a coluna nem existir, é um warning grave
+        warnings.append("Coluna obrigatória ausente no output: CODIGO_AMOSTRA")
+        last_data_row = ws.max_row
 
-    # analisar colunas obrigatórias
+    # 2) Para cada coluna obrigatória, verificar se há ALGUM valor entre 2..last_data_row
+    from processor import REQUIRED_DGAV_COLS  # garante consistência
+
     for col_name in REQUIRED_DGAV_COLS:
         col_idx = header_indices.get(col_name)
         if col_idx is None:
             warnings.append(f"Coluna obrigatória ausente no output: {col_name}")
             continue
 
-        any_value = False
-        any_empty = False
-
-        for row in range(2, ws.max_row + 1):
+        has_value = False
+        for row in range(2, last_data_row + 1):
             v = ws.cell(row=row, column=col_idx).value
             if v not in (None, ""):
-                any_value = True
-            else:
-                any_empty = True
+                has_value = True
+                break
 
-        if not any_value:
+        # Só avisar se a coluna estiver TOTALMENTE vazia
+        if not has_value:
             warnings.append(f"Coluna obrigatória sem registos: {col_name}")
-        elif any_empty:
-            warnings.append(f"Coluna obrigatória com células vazias: {col_name}")
 
     return sample_count, warnings
 
