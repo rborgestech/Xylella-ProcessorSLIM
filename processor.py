@@ -21,7 +21,7 @@ INPUT_TO_DGAV_COLMAP = {
     "TIPO_AMOSTRA": "Tipo amostra Simples / Composta",
     "ID_ZONA": "Id_Zona (Classificação de zona de origem)",
     "COD_INT_LAB": "Código interno Lab",
-    "DATA_REQUERIDO": "Data requerida",
+    "DATA_REQUERIDO": "Data requerido",
     "RESPONSAVEL_AMOSTRAGEM": "Responsável Amostragem (Zona colheita)",
     "RESP_COLHEITA": "Responsável colheita (Técnico responsável)",
     "PREP_COMMENTS": "Prep_Comments (Observações cliente)",
