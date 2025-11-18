@@ -17,8 +17,8 @@ def analyse_output_xlsx(xlsx_bytes: bytes) -> Tuple[int, List[str], List[str]]:
     """
     Analisa o ficheiro DGAV gerado:
       - sample_count: nº de amostras
-      - warnings: avisos leves
-      - hard_warnings: colunas obrigatórias com células vazias
+      - warnings: avisos leves (não usamos por agora)
+      - hard_warnings: colunas obrigatórias com células vazias/ausentes
     """
     wb = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
     ws = wb["Default"]
@@ -29,8 +29,8 @@ def analyse_output_xlsx(xlsx_bytes: bytes) -> Tuple[int, List[str], List[str]]:
         if v:
             header_indices[_norm(v)] = col
 
-    warnings = []
-    hard_warnings = []
+    warnings: List[str] = []
+    hard_warnings: List[str] = []
 
     # Determinar última linha com dados (CODIGO_AMOSTRA)
     codigo_idx = header_indices.get(_norm("CODIGO_AMOSTRA"))
@@ -46,7 +46,7 @@ def analyse_output_xlsx(xlsx_bytes: bytes) -> Tuple[int, List[str], List[str]]:
     else:
         hard_warnings.append("Coluna obrigatória ausente no output: CODIGO_AMOSTRA")
 
-    # Verificar colunas obrigatórias (modo 2)
+    # Verificar colunas obrigatórias (modo 2: qualquer célula vazia)
     for col_name in REQUIRED_DGAV_COLS:
         col_idx = header_indices.get(_norm(col_name))
         if col_idx is None:
@@ -94,7 +94,6 @@ st.caption(
     "e gera automaticamente o ficheiro **DGAV_SAMPLE_REGISTRATION_FILE_XYLELLA.xlsx**."
 )
 
-# CSS
 st.markdown(
     """
 <style>
@@ -159,7 +158,7 @@ st.markdown(
 # Session state
 # ───────────────────────────────────────────────
 if "stage" not in st.session_state:
-    st.session_state.stage = "idle"
+    st.session_state.stage = "idle"   # idle / processing / done
 if "uploads" not in st.session_state:
     st.session_state.uploads = None
 if "results" not in st.session_state:
@@ -173,10 +172,14 @@ def reset_app():
 
 
 def render_results():
-    """Mostra resultados já processados, sem repetir processamento."""
+    """Mostra resultados já processados (fase 'done')."""
     res = st.session_state.results
+    if not res:
+        return
+
     outputs = res["outputs"]
 
+    # Caixas por ficheiro
     for status in res["file_statuses"]:
         st.markdown(
             f"""
@@ -189,7 +192,7 @@ def render_results():
             unsafe_allow_html=True,
         )
 
-    # Summary final
+    # Resumo final
     st.markdown(
         f"""
         <div style='text-align:center;margin-top:1.5rem;'>
@@ -203,9 +206,9 @@ def render_results():
         unsafe_allow_html=True,
     )
 
-    # Downloads
     timestamp = res["timestamp"]
 
+    # Botões de download
     if len(outputs) == 1:
         name, data, _, _, _, _ = outputs[0]
         base = name.rsplit(".", 1)[0]
@@ -213,29 +216,26 @@ def render_results():
 
         st.download_button(
             "⬇️ Descarregar ficheiro DGAV",
-            data,
-            out_name,
+            data=data,
+            file_name=out_name,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-
     else:
         zip_bytes = build_zip_with_summary(outputs, res["summary_lines"], timestamp)
         zip_name = f"xylella_dgav_{timestamp}.zip"
-
         st.download_button(
             "📦 Descarregar resultados (ZIP)",
-            zip_bytes,
-            zip_name,
+            data=zip_bytes,
+            file_name=zip_name,
             mime="application/zip",
         )
 
-    # Novo processamento
     st.markdown("<br>", unsafe_allow_html=True)
     st.button("🔁 Novo processamento", on_click=reset_app, use_container_width=True)
 
 
 # ───────────────────────────────────────────────
-# MAIN LOGIC
+# Máquina de estados: idle / processing / done
 # ───────────────────────────────────────────────
 if st.session_state.stage == "idle":
 
@@ -248,29 +248,28 @@ if st.session_state.stage == "idle":
     if uploads:
         if st.button("📄 Processar ficheiros de Input", type="primary"):
             st.session_state.uploads = uploads
-            st.session_state.stage = "processing"
             st.session_state.results = None
+            st.session_state.stage = "processing"
             st.rerun()
     else:
         st.info("💡 Carrega pelo menos um ficheiro.")
 
 elif st.session_state.stage == "processing":
 
-    # Se já temos resultados → só mostrar
+    # Se por algum motivo já houver resultados, saltamos para 'done'
     if st.session_state.results is not None:
-        render_results()
-        st.stop()
+        st.session_state.stage = "done"
+        st.rerun()
 
-    # Caso contrário → processar agora
     uploads = st.session_state.uploads
     total = len(uploads)
 
     st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
     progress = st.progress(0.0)
 
-    outputs = []
-    summary_lines = []
-    file_statuses = []
+    outputs: List[Tuple[str, bytes, int, List[str], List[str], str]] = []
+    summary_lines: List[str] = []
+    file_statuses: List[Dict] = []
     total_samples = 0
     warning_files = 0
     error_files = 0
@@ -292,11 +291,10 @@ elif st.session_state.stage == "processing":
             data_in = io.BytesIO(up.getbuffer())
             output_bytes, log_msg = process_pre_to_dgav(data_in)
 
-            sample_count, soft_warn, hard_warn = analyse_output_xlsx(output_bytes)
+            sample_count, soft_warns, hard_warns = analyse_output_xlsx(output_bytes)
             total_samples += sample_count
 
-            # Warnings = amarelo
-            combined_warns = hard_warn + soft_warn
+            combined_warns = hard_warns + soft_warns
 
             if combined_warns:
                 status_class = "warning"
@@ -307,25 +305,29 @@ elif st.session_state.stage == "processing":
                 status_class = "success"
                 message_html = ""
 
-            outputs.append((up.name, output_bytes, sample_count, soft_warn, hard_warn, status_class))
+            outputs.append(
+                (up.name, output_bytes, sample_count, soft_warns, hard_warns, status_class)
+            )
 
-            file_statuses.append({
-                "name": up.name,
-                "sample_count": sample_count,
-                "status_class": status_class,
-                "message_html": message_html
-            })
-
-            summary_line = f"{up.name}: {sample_count} amostras. {log_msg}"
+            summary_line = f"{up.name}: {sample_count} amostra(s). {log_msg}"
             if combined_warns:
                 summary_line += " ⚠ " + " | ".join(combined_warns)
             summary_lines.append(summary_line)
+
+            file_statuses.append(
+                {
+                    "name": up.name,
+                    "sample_count": sample_count,
+                    "status_class": status_class,
+                    "message_html": message_html,
+                }
+            )
 
             placeholder.markdown(
                 f"""
                 <div class='file-box {status_class}'>
                   <div class='file-title'>📄 {up.name}</div>
-                  <div class='file-sub'><b>{sample_count}</b> amostras processadas.</div>
+                  <div class='file-sub'><b>{sample_count}</b> amostra(s) processadas.</div>
                   {message_html}
                 </div>
                 """,
@@ -337,12 +339,14 @@ elif st.session_state.stage == "processing":
             msg = f"{up.name}: erro ao processar ({e})"
             summary_lines.append(msg)
 
-            file_statuses.append({
-                "name": up.name,
-                "sample_count": 0,
-                "status_class": "error",
-                "message_html": f"<div class='file-sub'>❌ Erro ao processar: {e}</div>"
-            })
+            file_statuses.append(
+                {
+                    "name": up.name,
+                    "sample_count": 0,
+                    "status_class": "error",
+                    "message_html": f"<div class='file-sub'>❌ Erro ao processar: {e}</div>",
+                }
+            )
 
             placeholder.markdown(
                 f"""
@@ -356,7 +360,6 @@ elif st.session_state.stage == "processing":
 
         progress.progress(i / total)
 
-    # Final summary lines
     summary_lines.append("")
     summary_lines.append(f"Total de ficheiros válidos: {len(outputs)}")
     summary_lines.append(f"Total de amostras: {total_samples}")
@@ -364,7 +367,6 @@ elif st.session_state.stage == "processing":
     summary_lines.append(f"Ficheiros com erro: {error_files}")
     summary_lines.append(f"Executado em: {datetime.now():%d/%m/%Y %H:%M:%S}")
 
-    # Guardar resultados
     st.session_state.results = {
         "outputs": outputs,
         "summary_lines": summary_lines,
@@ -375,5 +377,9 @@ elif st.session_state.stage == "processing":
         "file_statuses": file_statuses,
     }
 
+    # Transição para fase 'done'
+    st.session_state.stage = "done"
+    st.rerun()
+
+elif st.session_state.stage == "done":
     render_results()
-    st.stop()
