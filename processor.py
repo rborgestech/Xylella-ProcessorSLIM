@@ -19,7 +19,7 @@ INPUT_TO_DGAV_COLMAP = {
     "CODIGO_AMOSTRA": "Código_amostra (Código original / Referência amostra)",
     "HOSPEDEIRO": "Espécie indicada / Hospedeiro",
     "TIPO_AMOSTRA": "Tipo amostra Simples / Composta",
-    "ID_ZONA": "Id Zona (Classificação de zona de origem)",
+    "ID_ZONA": "Id_Zona (Classificação de zona de origem)",
     "COD_INT_LAB": "Código interno Lab",
     "DATA_REQUERIDO": "Data requerida",
     "RESPONSAVEL_AMOSTRAGEM": "Responsável Amostragem (Zona colheita)",
