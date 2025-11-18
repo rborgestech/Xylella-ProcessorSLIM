@@ -37,6 +37,8 @@ REQUIRED_DGAV_COLS = [
     "TIPO_AMOSTRA",
     "ID_ZONA",
     "PROCEDURE",
+    "COD_INT_LAB",
+    "DATA_REQUERIDO"
 ]
 
 
