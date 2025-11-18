@@ -5,11 +5,11 @@ from typing import Tuple, Dict
 
 import pandas as pd
 from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
 
 
-# Caminho para o template DGAV de saída
+# Caminho para o template DGAV de saída (NUNCA é alterado em disco)
 DGAV_TEMPLATE_PATH = Path(__file__).parent / "DGAV_SAMPLE_REGISTRATION_FILE_XYLELLA.xlsx"
-
 
 # Mapeamento entre colunas do ficheiro de pré-registo e colunas DGAV
 # (keys = coluna DGAV, values = coluna no ficheiro de pré-registo)
@@ -19,15 +19,27 @@ INPUT_TO_DGAV_COLMAP = {
     "CODIGO_AMOSTRA": "Código_amostra (Código original / Referência amostra)",
     "HOSPEDEIRO": "Espécie indicada / Hospedeiro",
     "TIPO_AMOSTRA": "Tipo amostra Simples / Composta",
-    "ID_ZONA": "Id_Zona (Classificação de zona de origem)",
+    "ID_ZONA": "Id Zona (Classificação de zona de origem)",
     "COD_INT_LAB": "Código interno Lab",
-    "DATA_REQUERIDO": "Data requerido",
-    # ------------------------
+    "DATA_REQUERIDO": "Data requerida",
     "RESPONSAVEL_AMOSTRAGEM": "Responsável Amostragem (Zona colheita)",
     "RESP_COLHEITA": "Responsável colheita (Técnico responsável)",
     "PREP_COMMENTS": "Prep_Comments (Observações cliente)",
     "PROCEDURE": "Procedure",
 }
+
+# Colunas DGAV consideradas obrigatórias para validação
+REQUIRED_DGAV_COLS = [
+    "DATA_RECEPCAO",
+    "DATA_COLHEITA",
+    "CODIGO_AMOSTRA",
+    "HOSPEDEIRO",
+    "TIPO_AMOSTRA",
+    "ID_ZONA",
+    # "COD_INT_LAB",       # ativa se quiseres também obrigatória
+    # "DATA_REQUERIDO",    # idem
+    "PROCEDURE",
+]
 
 
 def _find_header_row(df_raw: pd.DataFrame, target: str) -> int:
@@ -43,33 +55,23 @@ def _find_header_row(df_raw: pd.DataFrame, target: str) -> int:
     raise ValueError("Não foi possível encontrar a linha de cabeçalho no ficheiro de pré-registo.")
 
 
-
-
 def _load_pre_registo_df(uploaded_file) -> pd.DataFrame:
     """
     Lê o Excel de pré-registo usando openpyxl data_only=True
     para obter os valores calculados das fórmulas.
-    Depois converte para DataFrame mantendo o cabeçalho correto.
     """
     wb = load_workbook(uploaded_file, data_only=True)
     ws = wb.active
 
-    # Ler todas as linhas como listas
     rows = list(ws.values)
-
     df_raw = pd.DataFrame(rows)
 
-    # Encontrar a linha com o cabeçalho
     header_row = _find_header_row(df_raw, "Código_amostra (Código original / Referência amostra)")
     headers = df_raw.iloc[header_row].tolist()
 
-    # DataFrame final
     df = df_raw.iloc[header_row + 1:].copy()
     df.columns = headers
-
-    # Remover linhas totalmente vazias
-    df = df.dropna(how="all")
-
+    df = df.dropna(how="all")  # remove linhas completamente vazias
     return df
 
 
@@ -82,6 +84,29 @@ def _build_header_index(ws) -> Dict[str, int]:
         if val:
             header_indices[str(val)] = col
     return header_indices
+
+
+def _mark_required_empty_columns(ws, header_indices: Dict[str, int], start_row: int = 2) -> None:
+    """
+    Para cada coluna obrigatória, se todas as células de dados estiverem vazias,
+    pinta o cabeçalho a vermelho.
+    """
+    red_fill = PatternFill(start_color="FFFF0000", end_color="FFFF0000", fill_type="solid")
+
+    for col_name in REQUIRED_DGAV_COLS:
+        col_idx = header_indices.get(col_name)
+        if col_idx is None:
+            continue
+
+        has_value = False
+        for row in range(start_row, ws.max_row + 1):
+            val = ws.cell(row=row, column=col_idx).value
+            if val not in (None, ""):
+                has_value = True
+                break
+
+        if not has_value:
+            ws.cell(row=1, column=col_idx).fill = red_fill
 
 
 def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
@@ -99,7 +124,7 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
     df_in = _load_pre_registo_df(uploaded_file)
     df_in = df_in.reset_index(drop=True)
 
-    # Carrega template DGAV
+    # Carrega template DGAV FRESCO em memória (não altera o ficheiro em disco)
     wb = load_workbook(DGAV_TEMPLATE_PATH)
     ws = wb["Default"]
 
@@ -110,7 +135,7 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
     # Índice de cabeçalhos DGAV
     header_indices = _build_header_index(ws)
 
-    # Limpa linhas de dados existentes (a partir da linha 2)
+    # Limpa linhas de dados existentes (a partir da linha 2) para não acumular registos
     if ws.max_row > 1:
         ws.delete_rows(2, ws.max_row - 1)
 
@@ -141,7 +166,10 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
 
             ws.cell(row=excel_row, column=col_idx).value = value
 
-    # Exporta para bytes em memória
+    # Validação: marcar colunas obrigatórias sem dados a vermelho
+    _mark_required_empty_columns(ws, header_indices, start_row=start_row)
+
+    # Exporta para bytes em memória (nada é gravado em disco)
     output = BytesIO()
     wb.save(output)
     output.seek(0)
