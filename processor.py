@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 
 
-# Caminho do template DGAV (NUNCA é alterado)
+# Caminho do template DGAV (NUNCA é alterado em disco)
 DGAV_TEMPLATE_PATH = Path(__file__).parent / "DGAV_SAMPLE_REGISTRATION_FILE_XYLELLA.xlsx"
 
 
@@ -89,8 +89,11 @@ def _build_header_index(ws) -> Dict[str, int]:
     return header_indices
 
 
-def _mark_required_empty_columns(ws, header_indices: Dict[str, int], start_row: int = 2):
-    """Pinta de vermelho colunas obrigatórias sem valores."""
+def _mark_required_empty_columns(ws, header_indices: Dict[str, int], start_row: int, last_row: int):
+    """
+    Pinta de vermelho colunas obrigatórias que não tenham QUALQUER valor
+    entre start_row e last_row.
+    """
     red = PatternFill(start_color="FFFF0000", end_color="FFFF0000", fill_type="solid")
 
     for col_name in REQUIRED_DGAV_COLS:
@@ -100,7 +103,7 @@ def _mark_required_empty_columns(ws, header_indices: Dict[str, int], start_row: 
 
         has_value = any(
             ws.cell(row=r, column=col_idx).value not in (None, "")
-            for r in range(start_row, ws.max_row + 1)
+            for r in range(start_row, last_row + 1)
         )
 
         if not has_value:
@@ -118,11 +121,12 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
     if not DGAV_TEMPLATE_PATH.exists():
         raise FileNotFoundError("Template DGAV não encontrado.")
 
-    # Carregar pré-registo
+    # 1) Carregar pré-registo
     df_in = _load_pre_registo_df(uploaded_file)
     df_in = df_in.reset_index(drop=True)
+    n_samples = len(df_in)
 
-    # Carregar template DGAV SEMPRE fresco (bytes → BytesIO)
+    # 2) Carregar template DGAV SEMPRE fresco (bytes → BytesIO)
     template_bytes = DGAV_TEMPLATE_PATH.read_bytes()
     template_stream = BytesIO(template_bytes)
     wb = load_workbook(template_stream)
@@ -131,30 +135,36 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
     header_indices = _build_header_index(ws)
     max_col = ws.max_column
 
-    # ─────────────────────────────
-    # 1) LIMPAR TEMPLATE (manter só linha 1 e linha 2)
-    # ─────────────────────────────
-    if ws.max_row > 2:
-        ws.delete_rows(3, ws.max_row - 2)
+    # 3) Determinar que colunas são "constantes" (tudo o que NÃO está em INPUT_TO_DGAV_COLMAP)
+    variable_cols = set(INPUT_TO_DGAV_COLMAP.keys())
+    constant_cols = [name for name in header_indices.keys() if name not in variable_cols]
 
-    # Guardar linha 2 como "modelo"
-    template_row = [ws.cell(row=2, column=c).value for c in range(1, max_col + 1)]
+    # Guardar valores da linha 2 apenas para colunas constantes
+    base_values = {}
+    for col_name in constant_cols:
+        col_idx = header_indices[col_name]
+        base_values[col_name] = ws.cell(row=2, column=col_idx).value
 
-    # ─────────────────────────────
-    # 2) REPLICAR LINHA 2 PARA CADA AMOSTRA
-    # ─────────────────────────────
+    # 4) LIMPAR TODOS OS VALORES (mantendo formatação) a partir da linha 2
+    for row in range(2, ws.max_row + 1):
+        for col in range(1, max_col + 1):
+            ws.cell(row=row, column=col).value = None
+
+    # 5) Escrever uma linha por amostra
     start_row = 2
+    last_row = start_row + n_samples - 1 if n_samples > 0 else 1
+
     for i, (_, row_in) in enumerate(df_in.iterrows()):
         excel_row = start_row + i
 
-        # Criar nova linha com base na linha 2
-        if excel_row > ws.max_row:
-            ws.append(template_row)
-        else:
-            for c in range(1, max_col + 1):
-                ws.cell(row=excel_row, column=c).value = template_row[c - 1]
+        # 5.1 Preencher colunas constantes com o valor da linha 2 original
+        for col_name in constant_cols:
+            col_idx = header_indices.get(col_name)
+            if col_idx is None:
+                continue
+            ws.cell(row=excel_row, column=col_idx).value = base_values.get(col_name)
 
-        # Substituir valores apenas nas colunas DGAV mapeadas
+        # 5.2 Preencher colunas variáveis com dados do pré-registo
         for dgav_col, input_col in INPUT_TO_DGAV_COLMAP.items():
             col_idx = header_indices.get(dgav_col)
             if col_idx is None:
@@ -162,24 +172,23 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
 
             value = row_in.get(input_col)
 
+            # Converte NaN em None
             if isinstance(value, float) and pd.isna(value):
                 value = None
 
+            # Remove hora se for datetime
             if hasattr(value, "date"):
                 value = value.date()
 
             ws.cell(row=excel_row, column=col_idx).value = value
 
-    # ─────────────────────────────
-    # 3) VALIDAR E COLORIR CABEÇALHOS VAZIOS
-    # ─────────────────────────────
-    _mark_required_empty_columns(ws, header_indices, start_row=2)
+    # 6) Validar colunas obrigatórias apenas no intervalo de amostras
+    if n_samples > 0:
+        _mark_required_empty_columns(ws, header_indices, start_row=start_row, last_row=last_row)
 
-    # ─────────────────────────────
-    # 4) EXPORTAR PARA BYTES (sem tocar no disco)
-    # ─────────────────────────────
+    # 7) Exportar para bytes (sem tocar no disco)
     output = BytesIO()
     wb.save(output)
     output.seek(0)
 
-    return output.getvalue(), f"Foram processadas {len(df_in)} amostras."
+    return output.getvalue(), f"Foram processadas {n_samples} amostras."
