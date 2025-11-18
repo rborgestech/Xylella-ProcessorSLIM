@@ -19,13 +19,15 @@ INPUT_TO_DGAV_COLMAP = {
     "CODIGO_AMOSTRA": "Código_amostra (Código original / Referência amostra)",
     "HOSPEDEIRO": "Espécie indicada / Hospedeiro",
     "TIPO_AMOSTRA": "Tipo amostra Simples / Composta",
+    # <<< ESTES 3 CAMPOS >>>
     "ID_ZONA": "Id Zona (Classificação de zona de origem)",
+    "COD_INT_LAB": "Código interno Lab",
+    "DATA_REQUERIDO": "Data requerida",
+    # ------------------------
     "RESPONSAVEL_AMOSTRAGEM": "Responsável Amostragem (Zona colheita)",
     "RESP_COLHEITA": "Responsável colheita (Técnico responsável)",
     "PREP_COMMENTS": "Prep_Comments (Observações cliente)",
-    "COD_INT_LAB": "Código interno Lab",
     "PROCEDURE": "Procedure",
-    "DATA_REQUERIDO": "Data requerida",
 }
 
 
@@ -115,7 +117,7 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
             if isinstance(value, float) and pd.isna(value):
                 value = None
 
-            # >>> REMOVE A HORA SE FOR DATETIME <<<
+            # Se for datetime, remove a hora
             if hasattr(value, "date"):
                 value = value.date()
 
