@@ -59,7 +59,7 @@ def _find_header_row(df_raw: pd.DataFrame, target: str) -> int:
 
 
 def _load_pre_registo_df(uploaded_file) -> pd.DataFrame:
-    """Lê os valores DO FORMULÁRIO já calculados usando openpyxl."""
+    """Lê os valores do pré-registo já calculados usando openpyxl."""
     wb = load_workbook(uploaded_file, data_only=True)
     ws = wb.active
 
@@ -69,7 +69,7 @@ def _load_pre_registo_df(uploaded_file) -> pd.DataFrame:
     header_row = _find_header_row(df_raw, "Código_amostra (Código original / Referência amostra)")
     headers = df_raw.iloc[header_row].tolist()
 
-    df = df_raw.iloc[header_row + 1:].copy()
+    df = df_raw.iloc[header_row + 1 :].copy()
     df.columns = headers
     df = df.dropna(how="all")
 
@@ -126,7 +126,7 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
     df_in = df_in.reset_index(drop=True)
     n_samples = len(df_in)
 
-    # 2) Carregar template DGAV SEMPRE fresco (bytes → BytesIO)
+    # 2) Carregar template DGAV sempre fresco (bytes → BytesIO)
     template_bytes = DGAV_TEMPLATE_PATH.read_bytes()
     template_stream = BytesIO(template_bytes)
     wb = load_workbook(template_stream)
@@ -135,36 +135,33 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
     header_indices = _build_header_index(ws)
     max_col = ws.max_column
 
-    # 3) Determinar que colunas são "constantes" (tudo o que NÃO está em INPUT_TO_DGAV_COLMAP)
+    # 3) Determinar colunas variáveis vs constantes
     variable_cols = set(INPUT_TO_DGAV_COLMAP.keys())
-    constant_cols = [name for name in header_indices.keys() if name not in variable_cols]
+    all_cols = list(header_indices.keys())
+    constant_cols = [name for name in all_cols if name not in variable_cols]
 
-    # Guardar valores da linha 2 apenas para colunas constantes
+    # Guardar valores da linha 2 do template original para TODAS as colunas
     base_values = {}
-    for col_name in constant_cols:
-        col_idx = header_indices[col_name]
+    for col_name, col_idx in header_indices.items():
         base_values[col_name] = ws.cell(row=2, column=col_idx).value
 
-    # 4) LIMPAR TODOS OS VALORES (mantendo formatação) a partir da linha 2
-    for row in range(2, ws.max_row + 1):
-        for col in range(1, max_col + 1):
-            ws.cell(row=row, column=col).value = None
+    # 4) APAGAR TODAS AS LINHAS A PARTIR DA LINHA 2
+    # (fica apenas a linha de cabeçalho original)
+    if ws.max_row > 1:
+        ws.delete_rows(2, ws.max_row - 1)
 
-    # 5) Escrever uma linha por amostra
+    # 5) Escrever uma linha por amostra, a partir da linha 2
     start_row = 2
     last_row = start_row + n_samples - 1 if n_samples > 0 else 1
 
     for i, (_, row_in) in enumerate(df_in.iterrows()):
         excel_row = start_row + i
 
-        # 5.1 Preencher colunas constantes com o valor da linha 2 original
-        for col_name in constant_cols:
-            col_idx = header_indices.get(col_name)
-            if col_idx is None:
-                continue
+        # 5.1 Preencher TODAS as colunas com os valores da antiga linha 2 (base_values)
+        for col_name, col_idx in header_indices.items():
             ws.cell(row=excel_row, column=col_idx).value = base_values.get(col_name)
 
-        # 5.2 Preencher colunas variáveis com dados do pré-registo
+        # 5.2 Substituir colunas variáveis com dados do pré-registo
         for dgav_col, input_col in INPUT_TO_DGAV_COLMAP.items():
             col_idx = header_indices.get(dgav_col)
             if col_idx is None:
