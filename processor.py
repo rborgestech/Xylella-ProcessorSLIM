@@ -11,8 +11,8 @@ from openpyxl import load_workbook
 DGAV_TEMPLATE_PATH = Path(__file__).parent / "DGAV_SAMPLE_REGISTRATION_FILE_XYLELLA.xlsx"
 
 
-# Mapeamento entre colunas do ficheiro de pré‑registo e colunas DGAV
-# (keys = coluna DGAV, values = coluna no ficheiro de pré‑registo)
+# Mapeamento entre colunas do ficheiro de pré-registo e colunas DGAV
+# (keys = coluna DGAV, values = coluna no ficheiro de pré-registo)
 INPUT_TO_DGAV_COLMAP = {
     "DATA_RECEPCAO": "Data recepção amostras",
     "DATA_COLHEITA": "Data colheita",
@@ -43,11 +43,11 @@ def _find_header_row(df_raw: pd.DataFrame, target: str) -> int:
 
 
 def _load_pre_registo_df(uploaded_file) -> pd.DataFrame:
-    """Lê o Excel de pré‑registo para DataFrame, detectando a linha de cabeçalhos."""
+    """Lê o Excel de pré-registo para DataFrame, detectando a linha de cabeçalhos."""
     df_raw = pd.read_excel(uploaded_file, sheet_name=0, header=None, dtype=object)
     header_row = _find_header_row(df_raw, "Código_amostra (Código original / Referência amostra)")
     headers = df_raw.iloc[header_row].tolist()
-    df = df_raw.iloc[header_row + 1 :].copy()
+    df = df_raw.iloc[header_row + 1:].copy()
     df.columns = headers
     df = df.dropna(how="all")  # remove linhas completamente vazias
     return df
@@ -66,7 +66,7 @@ def _build_header_index(ws) -> Dict[str, int]:
 
 def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
     """
-    Recebe o Excel de pré‑registo e devolve o ficheiro DGAV preenchido (em bytes).
+    Recebe o Excel de pré-registo e devolve o ficheiro DGAV preenchido (em bytes).
 
     Returns
     -------
@@ -103,15 +103,22 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
         for col in range(1, max_col + 1):
             ws.cell(row=excel_row, column=col).value = base_values.get(col)
 
-        # Preenche campos específicos vindos do ficheiro de pré‑registo
+        # Preenche campos específicos vindos do ficheiro de pré-registo
         for dgav_col, input_col in INPUT_TO_DGAV_COLMAP.items():
             col_idx = header_indices.get(dgav_col)
             if col_idx is None:
                 continue
+
             value = row_in.get(input_col, None)
-            # Converte NaN em None para não poluir o Excel
+
+            # Converte NaN para None
             if isinstance(value, float) and pd.isna(value):
                 value = None
+
+            # >>> REMOVE A HORA SE FOR DATETIME <<<
+            if hasattr(value, "date"):
+                value = value.date()
+
             ws.cell(row=excel_row, column=col_idx).value = value
 
     # Exporta para bytes em memória
