@@ -33,7 +33,7 @@ def analyse_output_xlsx(xlsx_bytes: bytes) -> Tuple[int, List[str], List[str]]:
     hard_warnings: List[str] = []
 
     # Determinar última linha com dados (CODIGO_AMOSTRA)
-    codigo_idx = header_indices.get(_norm("CODIGO_AMOSTRA"))
+    codigo_idx = header_indices.get(_norm("DESCRICAO"))
     sample_count = 0
     last_row = 1
 
@@ -44,7 +44,7 @@ def analyse_output_xlsx(xlsx_bytes: bytes) -> Tuple[int, List[str], List[str]]:
                 sample_count += 1
                 last_row = row
     else:
-        hard_warnings.append("Coluna obrigatória ausente no output: CODIGO_AMOSTRA")
+        hard_warnings.append("Coluna obrigatória ausente no output: DESCRICAO")
 
     # Verificar colunas obrigatórias (modo 2: qualquer célula vazia)
     for col_name in REQUIRED_DGAV_COLS:
