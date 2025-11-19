@@ -88,10 +88,10 @@ def build_zip_with_summary(
 # ───────────────────────────────────────────────
 st.set_page_config(page_title="Xylella → DGAV", page_icon="🧪", layout="centered")
 
-st.title("🧪 Xylella – Conversor Pré-registo → DGAV")
+st.title("🧪 Xylella – Conversor para SLIM")
 st.caption(
-    "Carrega ficheiros **“AVALIAÇÃO PRÉ-REGISTO – Amostras Xylella”** "
-    "e gera automaticamente o ficheiro **DGAV_SAMPLE_REGISTRATION_FILE_XYLELLA.xlsx**."
+    "Carrega ficheiros **“AVALIAÇÃO PRÉ-PROCESSAMENTO – Amostras Xylella”** "
+    "e gera automaticamente o ficheiro SLIM **DGAV_SAMPLE_REGISTRATION_FILE_XYLELLA.xlsx**."
 )
 
 st.markdown(
