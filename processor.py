@@ -100,7 +100,7 @@ def _load_pre_registo_df(uploaded_file) -> pd.DataFrame:
 # Filtrar apenas linhas com CODIGO_AMOSTRA
 # ───────────────────────────────────────────────
 def _filter_sample_rows(df: pd.DataFrame) -> pd.DataFrame:
-    target_norm = _norm(INPUT_TO_DGAV_COLMAP["CODIGO_AMOSTRA"])
+    target_norm = _norm(INPUT_TO_DGAV_COLMAP["DESCRICAO"])
     cod_col = None
 
     for col in df.columns:
