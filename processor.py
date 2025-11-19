@@ -195,6 +195,27 @@ def _mark_required_empty_columns(ws, header_indices: Dict[str, int], start_row: 
 # ───────────────────────────────────────────────
 # PROCESSAMENTO PRINCIPAL
 # ───────────────────────────────────────────────
+def _filter_sample_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Mantém apenas as linhas que representam amostras reais:
+    aquelas em que a coluna 'Código_amostra (Código original / Referência amostra)'
+    está preenchida.
+    """
+    target_norm = _norm(INPUT_TO_DGAV_COLMAP["CODIGO_AMOSTRA"])
+    cod_col = None
+
+    for col in df.columns:
+        if _norm(col) == target_norm:
+            cod_col = col
+            break
+
+    # Se não encontrar a coluna, devolve o DF como está (fallback seguro)
+    if cod_col is None:
+        return df
+
+    mask = df[cod_col].notna() & (df[cod_col].astype(str).str.strip() != "")
+    return df[mask].copy()
+
 def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
     """
     Converte ficheiro de PRÉ-REGISTO → DGAV.
@@ -205,6 +226,10 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
 
     # 1) Carregar pré-registo
     df_in = _load_pre_registo_df(uploaded_file)
+
+    # 🔹 NOVO: manter apenas linhas com CODIGO_AMOSTRA preenchido
+    df_in = _filter_sample_rows(df_in)
+
     df_in = df_in.reset_index(drop=True)
     n_samples = len(df_in)
 
@@ -263,29 +288,15 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
 
             ws.cell(row=excel_row, column=col_idx).value = value
 
-    # 5) Validar colunas obrigatórias (modo 2)
+    # 5) Validar colunas obrigatórias (modo 2: qualquer célula vazia)
     if n_samples > 0:
         _mark_required_empty_columns(ws, header_indices, start_row=start_row, last_row=last_row)
 
-    # 6) Cortar linhas extra (garantir que só existem as linhas necessárias)
+    # 6) (Opcional) Garantir que não há linhas extra
     if ws.max_row > last_row:
         ws.delete_rows(last_row + 1, ws.max_row - last_row)
-    
-    # 6B) Encolher também a tabela do Excel
-    # (senão o Excel "estica" as fórmulas/defaults até ao tamanho antigo da tabela)
-    for table in ws._tables:
-        start, end = table.ref.split(':')
-        start_col = ''.join(filter(str.isalpha, start))
-        start_row = int(''.join(filter(str.isdigit, start)))
-        end_col = ''.join(filter(str.isalpha, end))
-    
-        table.ref = f"{start_col}{start_row}:{end_col}{last_row}"
-    
-    # 6C) Remover validações de dados que cubram linhas infinitas
-    ws.data_validations.dataValidation = []
-    
-    # 7) Exportar para bytes
 
+    # 7) Exportar para bytes
     output = BytesIO()
     wb.save(output)
     output.seek(0)
