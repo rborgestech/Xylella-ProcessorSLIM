@@ -15,7 +15,7 @@ DGAV_TEMPLATE_PATH = Path(__file__).parent / "DGAV_SAMPLE_REGISTRATION_FILE_XYLE
 INPUT_TO_DGAV_COLMAP = {
     "DATA_RECEPCAO": "Data recepção amostras",
     "DATA_COLHEITA": "Data colheita",
-    "CODIGO_AMOSTRA": "Código_amostra (Código original / Referência amostra)",
+    "DESCRICAO": "Código_amostra (Código original / Referência amostra)",
     "HOSPEDEIRO": "Espécie indicada / Hospedeiro",
     "TIPO_AMOSTRA": "Tipo amostra Simples / Composta",
     "ID_ZONA": "Id Zona (Classificação de zona de origem)",
