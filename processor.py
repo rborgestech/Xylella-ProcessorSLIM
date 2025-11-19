@@ -280,8 +280,12 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
         end_col = ''.join(filter(str.isalpha, end))
     
         table.ref = f"{start_col}{start_row}:{end_col}{last_row}"
-
+    
+    # 6C) Remover validações de dados que cubram linhas infinitas
+    ws.data_validations.dataValidation = []
+    
     # 7) Exportar para bytes
+
     output = BytesIO()
     wb.save(output)
     output.seek(0)
