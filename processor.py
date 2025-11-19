@@ -2,13 +2,10 @@
 from io import BytesIO
 from pathlib import Path
 from typing import Tuple, Dict
-from copy import copy
 
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
-from openpyxl.worksheet.cell_range import MultiCellRange
-
 import unicodedata
 
 
@@ -43,9 +40,9 @@ REQUIRED_DGAV_COLS = [
 ]
 
 
-# ---------------------------------------------------------
-# Normalização tolerante de nomes
-# ---------------------------------------------------------
+# ───────────────────────────────────────────────
+# Normalização "tolerante"
+# ───────────────────────────────────────────────
 def _norm(text: str | None) -> str:
     if text is None:
         return ""
@@ -58,16 +55,18 @@ def _norm(text: str | None) -> str:
     return " ".join(s.split()).strip()
 
 
-# ---------------------------------------------------------
-# Encontrar cabeçalho no pré-registo
-# ---------------------------------------------------------
+# ───────────────────────────────────────────────
+# Cabeçalho no pré-registo
+# ───────────────────────────────────────────────
 def _find_header_row(df_raw: pd.DataFrame, target: str) -> int:
     target_norm = _norm(target)
 
+    # Passagem 1: match exato
     for idx, row in df_raw.iterrows():
         if row.astype(str).apply(_norm).eq(target_norm).any():
             return idx
 
+    # Passagem 2: fallback "codigo amostra"
     for idx, row in df_raw.iterrows():
         if row.astype(str).apply(_norm).str.contains("codigo amostra", na=False).any():
             return idx
@@ -75,9 +74,9 @@ def _find_header_row(df_raw: pd.DataFrame, target: str) -> int:
     raise ValueError("Não foi possível identificar a linha de cabeçalho no pré-registo.")
 
 
-# ---------------------------------------------------------
-# Leitura do pré-registo com fórmulas já calculadas
-# ---------------------------------------------------------
+# ───────────────────────────────────────────────
+# Ler pré-registo com fórmulas calculadas
+# ───────────────────────────────────────────────
 def _load_pre_registo_df(uploaded_file) -> pd.DataFrame:
     wb = load_workbook(uploaded_file, data_only=True)
     ws = wb.active
@@ -97,32 +96,32 @@ def _load_pre_registo_df(uploaded_file) -> pd.DataFrame:
     return df
 
 
-# ---------------------------------------------------------
-# Filtrar apenas linhas com CODIGO_AMOSTRA preenchido
-# ---------------------------------------------------------
+# ───────────────────────────────────────────────
+# Filtrar apenas linhas com CODIGO_AMOSTRA
+# ───────────────────────────────────────────────
 def _filter_sample_rows(df: pd.DataFrame) -> pd.DataFrame:
     target_norm = _norm(INPUT_TO_DGAV_COLMAP["CODIGO_AMOSTRA"])
-    col = None
+    cod_col = None
 
-    for c in df.columns:
-        if _norm(c) == target_norm:
-            col = c
+    for col in df.columns:
+        if _norm(col) == target_norm:
+            cod_col = col
             break
 
-    if col is None:
-        return df
+    if cod_col is None:
+        return df  # fallback seguro
 
-    mask = df[col].notna() & (df[col].astype(str).str.strip() != "")
+    mask = df[cod_col].notna() & (df[cod_col].astype(str).str.strip() != "")
     return df[mask].copy()
 
 
-# ---------------------------------------------------------
-# Mapear colunas do pré-registo para DGAV
-# ---------------------------------------------------------
+# ───────────────────────────────────────────────
+# Mapear colunas pré-registo → DGAV
+# ───────────────────────────────────────────────
 def _map_input_columns(df: pd.DataFrame) -> Dict[str, str]:
-    norm_to_real = { _norm(col): col for col in df.columns }
+    norm_to_real: Dict[str, str] = { _norm(col): col for col in df.columns }
 
-    mapped = {}
+    mapped: Dict[str, str] = {}
     for dgav_col, input_label in INPUT_TO_DGAV_COLMAP.items():
         key_norm = _norm(input_label)
         mapped[dgav_col] = norm_to_real.get(key_norm)
@@ -130,21 +129,22 @@ def _map_input_columns(df: pd.DataFrame) -> Dict[str, str]:
     return mapped
 
 
-# ---------------------------------------------------------
-# Construir mapa de cabeçalhos no template
-# ---------------------------------------------------------
+# ───────────────────────────────────────────────
+# Cabeçalhos no template DGAV
+# ───────────────────────────────────────────────
 def _build_header_index(ws) -> Dict[str, int]:
-    return {
-        _norm(ws.cell(row=1, column=c).value): c
-        for c in range(1, ws.max_column + 1)
-        if ws.cell(row=1, column=c).value
-    }
+    header_indices: Dict[str, int] = {}
+    for col in range(1, ws.max_column + 1):
+        v = ws.cell(row=1, column=col).value
+        if v:
+            header_indices[_norm(v)] = col
+    return header_indices
 
 
-# ---------------------------------------------------------
-# Marcar colunas obrigatórias com vermelho se faltar valor
-# ---------------------------------------------------------
-def _mark_required_empty_columns(ws, header_indices, start_row, last_row):
+# ───────────────────────────────────────────────
+# Validar colunas obrigatórias
+# ───────────────────────────────────────────────
+def _mark_required_empty_columns(ws, header_indices: Dict[str, int], start_row: int, last_row: int):
     red = PatternFill(start_color="FFFF0000", end_color="FFFF0000", fill_type="solid")
 
     for col_name in REQUIRED_DGAV_COLS:
@@ -152,104 +152,101 @@ def _mark_required_empty_columns(ws, header_indices, start_row, last_row):
         if col_idx is None:
             continue
 
-        any_empty = any(
-            ws.cell(row=r, column=col_idx).value in (None, "")
-            for r in range(start_row, last_row + 1)
-        )
+        any_empty = False
+        for r in range(start_row, last_row + 1):
+            v = ws.cell(row=r, column=col_idx).value
+            if v in (None, ""):
+                any_empty = True
+                break
 
         if any_empty:
             ws.cell(row=1, column=col_idx).fill = red
 
 
-# ---------------------------------------------------------
-# 🔥 Função principal FINAL
-# ---------------------------------------------------------
+# ───────────────────────────────────────────────
+# PROCESSAMENTO PRINCIPAL
+# ───────────────────────────────────────────────
 def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
+    """
+    Converte ficheiro de PRÉ-REGISTO → DGAV.
+    Mantém listas de valores do template.
+    Controla nº de linhas pelo CODIGO_AMOSTRA.
+    """
     if not DGAV_TEMPLATE_PATH.exists():
         raise FileNotFoundError("Template DGAV não encontrado.")
 
     # 1) Carregar pré-registo
     df_in = _load_pre_registo_df(uploaded_file)
 
-    # Filtrar só amostras reais
+    # 🔹 IMPORTANTE: só linhas com código de amostra
     df_in = _filter_sample_rows(df_in)
     df_in = df_in.reset_index(drop=True)
-
     n_samples = len(df_in)
+
     input_colmap = _map_input_columns(df_in)
 
-    # 2) Carregar template
+    # 2) Carregar template DGAV
     template_bytes = DGAV_TEMPLATE_PATH.read_bytes()
-    wb = load_workbook(BytesIO(template_bytes))
+    template_stream = BytesIO(template_bytes)
+    wb = load_workbook(template_stream)
     ws = wb["Default"]
 
     header_indices = _build_header_index(ws)
 
-    # Guardar linha default
-    base_values = {
-        norm_name: ws.cell(row=2, column=col_idx).value
-        for norm_name, col_idx in header_indices.items()
-    }
+    # Guardar valores da linha 2 (defaults)
+    base_values: Dict[str, object] = {}
+    for norm_name, col_idx in header_indices.items():
+        base_values[norm_name] = ws.cell(row=2, column=col_idx).value
 
-    # Guardar listas de validação
-    original_validations = list(ws.data_validations.dataValidation)
-
-    # 3) Limpar linhas abaixo da linha 1
+    # 3) Apagar TODAS as linhas a partir da linha 2
     if ws.max_row > 1:
         ws.delete_rows(2, ws.max_row - 1)
 
-    # 4) Escrever linhas
+    # 4) Escrever uma linha por amostra
     start_row = 2
-    last_row = start_row + n_samples - 1
+    last_row = start_row + n_samples - 1 if n_samples > 0 else 1
 
     for i, (_, row_in) in enumerate(df_in.iterrows()):
         excel_row = start_row + i
 
-        # Copiar defaults
+        # 4.1 Preencher linha com defaults
         for norm_name, col_idx in header_indices.items():
-            ws.cell(row=excel_row, column=col_idx).value = base_values[norm_name]
+            ws.cell(row=excel_row, column=col_idx).value = base_values.get(norm_name)
 
-        # Substituir pelas colunas do pré-registo
+        # 4.2 Substituir colunas vindas do pré-registo
         for dgav_col, input_label in INPUT_TO_DGAV_COLMAP.items():
             col_idx = header_indices.get(_norm(dgav_col))
             if col_idx is None:
                 continue
 
-            df_col = input_colmap.get(dgav_col)
-            if not df_col:
+            df_col_name = input_colmap.get(dgav_col)
+            if not df_col_name:
+                # coluna não existe no pré-registo → mantém default
                 continue
 
-            value = row_in.get(df_col)
+            value = row_in.get(df_col_name)
+
+            # Converte NaN em None
             if isinstance(value, float) and pd.isna(value):
                 value = None
+
+            # Remove hora se for datetime
             if hasattr(value, "date"):
                 value = value.date()
 
             ws.cell(row=excel_row, column=col_idx).value = value
 
-    # 5) Marcar erros
+    # 5) Validar colunas obrigatórias
     if n_samples > 0:
-        _mark_required_empty_columns(ws, header_indices, start_row, last_row)
+        _mark_required_empty_columns(ws, header_indices, start_row=start_row, last_row=last_row)
 
-    # 6) Cortar linhas extra
+    # 6) (defensivo) Garantir que não há linhas extra
     if ws.max_row > last_row:
         ws.delete_rows(last_row + 1, ws.max_row - last_row)
 
-    # 7) Reaplicar validações de dados apenas ao intervalo real
-    ws.data_validations.dataValidation = []
+    # 🔸 NÃO mexemos em ws.data_validations → listas do template mantêm-se
 
-    for dv in original_validations:
-        new_dv = copy(dv)
-
-        new_ranges = []
-        for r in dv.ranges.ranges:
-            col_letter = ''.join(filter(str.isalpha, str(r)))
-            new_ranges.append(f"{col_letter}{start_row}:{col_letter}{last_row}")
-
-        new_dv.ranges = MultiCellRange(new_ranges)
-        ws.data_validations.append(new_dv)
-
-    # 8) Exportar
+    # 7) Exportar
     output = BytesIO()
     wb.save(output)
     output.seek(0)
