@@ -267,9 +267,19 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
     if n_samples > 0:
         _mark_required_empty_columns(ws, header_indices, start_row=start_row, last_row=last_row)
 
-    # 6) **Cortar linhas extra — impedir defaults abaixo do bloco das amostras**
+    # 6) Cortar linhas extra (garantir que só existem as linhas necessárias)
     if ws.max_row > last_row:
         ws.delete_rows(last_row + 1, ws.max_row - last_row)
+    
+    # 6B) Encolher também a tabela do Excel
+    # (senão o Excel "estica" as fórmulas/defaults até ao tamanho antigo da tabela)
+    for table in ws._tables:
+        start, end = table.ref.split(':')
+        start_col = ''.join(filter(str.isalpha, start))
+        start_row = int(''.join(filter(str.isdigit, start)))
+        end_col = ''.join(filter(str.isalpha, end))
+    
+        table.ref = f"{start_col}{start_row}:{end_col}{last_row}"
 
     # 7) Exportar para bytes
     output = BytesIO()
