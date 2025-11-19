@@ -166,87 +166,82 @@ def _mark_required_empty_columns(ws, header_indices: Dict[str, int], start_row: 
 # ───────────────────────────────────────────────
 # PROCESSAMENTO PRINCIPAL
 # ───────────────────────────────────────────────
-def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
-    """
-    Converte ficheiro de PRÉ-REGISTO → DGAV.
-    Mantém listas de valores do template.
-    Controla nº de linhas pelo CODIGO_AMOSTRA.
-    """
-    if not DGAV_TEMPLATE_PATH.exists():
-        raise FileNotFoundError("Template DGAV não encontrado.")
+def process_pre_to_dgav(uploaded_file):
+    from io import BytesIO
+    import pandas as pd
+    from openpyxl import load_workbook
+    from openpyxl.utils import range_boundaries
+    from copy import copy
 
-    # 1) Carregar pré-registo
+    # ───────────────────────────────────────────────
+    # 1. Carregar pré-registo
+    # ───────────────────────────────────────────────
     df_in = _load_pre_registo_df(uploaded_file)
-
-    # 🔹 IMPORTANTE: só linhas com código de amostra
-    df_in = _filter_sample_rows(df_in)
-    df_in = df_in.reset_index(drop=True)
+    df_in = _filter_sample_rows(df_in).reset_index(drop=True)
     n_samples = len(df_in)
 
     input_colmap = _map_input_columns(df_in)
 
-    # 2) Carregar template DGAV
-    template_bytes = DGAV_TEMPLATE_PATH.read_bytes()
-    template_stream = BytesIO(template_bytes)
-    wb = load_workbook(template_stream)
+    # ───────────────────────────────────────────────
+    # 2. Carregar template
+    # ───────────────────────────────────────────────
+    wb = load_workbook(DGAV_TEMPLATE_PATH)
     ws = wb["Default"]
 
+    # Mapear cabeçalhos
     header_indices = _build_header_index(ws)
 
-    # Guardar valores da linha 2 (defaults)
-    base_values: Dict[str, object] = {}
-    for norm_name, col_idx in header_indices.items():
-        base_values[norm_name] = ws.cell(row=2, column=col_idx).value
+    # ───────────────────────────────────────────────
+    # 3. Apagar linhas antigas excepto linha 2
+    # ───────────────────────────────────────────────
+    if ws.max_row > 2:
+        ws.delete_rows(3, ws.max_row - 2)
 
-    # 3) Apagar TODAS as linhas a partir da linha 2
-    if ws.max_row > 1:
-        ws.delete_rows(2, ws.max_row - 1)
+    # ───────────────────────────────────────────────
+    # 4. Criar N-1 cópias da linha 2 (com validações)
+    # ───────────────────────────────────────────────
 
-    # 4) Escrever uma linha por amostra
-    start_row = 2
-    last_row = start_row + n_samples - 1 if n_samples > 0 else 1
+    def copy_row_with_all(row_source, row_target):
+        """Copia uma linha inteira com ESTILOS, VALIDAÇÕES e FORMATAÇÃO."""
+        for col in range(1, ws.max_column + 1):
+            cell_src = ws.cell(row=row_source, column=col)
+            cell_tgt = ws.cell(row=row_target, column=col)
 
-    for i, (_, row_in) in enumerate(df_in.iterrows()):
-        excel_row = start_row + i
+            cell_tgt.value = cell_src.value
+            if cell_src.has_style:
+                cell_tgt._style = copy(cell_src._style)
+            if cell_src.hyperlink:
+                cell_tgt._hyperlink = copy(cell_src.hyperlink)
+            if cell_src.comment:
+                cell_tgt.comment = copy(cell_src.comment)
 
-        # 4.1 Preencher linha com defaults
-        for norm_name, col_idx in header_indices.items():
-            ws.cell(row=excel_row, column=col_idx).value = base_values.get(norm_name)
+    # Criar linhas reais (linha 2 já existe)
+    for _ in range(n_samples - 1):
+        ws.insert_rows(3)
+        copy_row_with_all(2, 3)
 
-        # 4.2 Substituir colunas vindas do pré-registo
+    # ───────────────────────────────────────────────
+    # 5. Preencher dados do pré-registo
+    # ───────────────────────────────────────────────
+    for i, (_, row_in) in enumerate(df_in.iterrows(), start=2):
         for dgav_col, input_label in INPUT_TO_DGAV_COLMAP.items():
             col_idx = header_indices.get(_norm(dgav_col))
-            if col_idx is None:
+            if not col_idx:
                 continue
 
-            df_col_name = input_colmap.get(dgav_col)
-            if not df_col_name:
-                # coluna não existe no pré-registo → mantém default
+            df_col = input_colmap.get(dgav_col)
+            if not df_col:
                 continue
 
-            value = row_in.get(df_col_name)
-
-            # Converte NaN em None
-            if isinstance(value, float) and pd.isna(value):
-                value = None
-
-            # Remove hora se for datetime
+            value = row_in.get(df_col)
             if hasattr(value, "date"):
                 value = value.date()
 
-            ws.cell(row=excel_row, column=col_idx).value = value
+            ws.cell(row=i, column=col_idx).value = value
 
-    # 5) Validar colunas obrigatórias
-    if n_samples > 0:
-        _mark_required_empty_columns(ws, header_indices, start_row=start_row, last_row=last_row)
-
-    # 6) (defensivo) Garantir que não há linhas extra
-    if ws.max_row > last_row:
-        ws.delete_rows(last_row + 1, ws.max_row - last_row)
-
-    # 🔸 NÃO mexemos em ws.data_validations → listas do template mantêm-se
-
-    # 7) Exportar
+    # ───────────────────────────────────────────────
+    # 6. Exportar
+    # ───────────────────────────────────────────────
     output = BytesIO()
     wb.save(output)
     output.seek(0)
