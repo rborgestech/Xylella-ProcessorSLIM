@@ -208,7 +208,7 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
     df_in = df_in.reset_index(drop=True)
     n_samples = len(df_in)
 
-    # Fazer mapa tolerante entre colunas do DF e labels esperados
+    # Criar mapa tolerante entre colunas do DF e labels esperados
     input_colmap = _map_input_columns(df_in)
 
     # 2) Carregar template DGAV sempre fresco (bytes → BytesIO)
@@ -218,9 +218,8 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
     ws = wb["Default"]
 
     header_indices = _build_header_index(ws)
-    max_col = ws.max_column
 
-    # Guardar valores da linha 2 original (template base) PARA TODAS as colunas
+    # Guardar valores da linha 2 original (defaults do template)
     base_values: Dict[str, object] = {}
     for norm_name, col_idx in header_indices.items():
         base_values[norm_name] = ws.cell(row=2, column=col_idx).value
@@ -236,22 +235,23 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
     for i, (_, row_in) in enumerate(df_in.iterrows()):
         excel_row = start_row + i
 
-        # 4.1 Preencher todas as colunas com os valores base da antiga linha 2
+        # 4.1 Preencher linha com defaults do template (linha 2)
         for norm_name, col_idx in header_indices.items():
             ws.cell(row=excel_row, column=col_idx).value = base_values.get(norm_name)
 
-        # 4.2 Substituir colunas variáveis com dados do pré-registo
+        # 4.2 Substituir colunas do pré-registo (mantendo defaults se não existir no DF)
         for dgav_col, input_label in INPUT_TO_DGAV_COLMAP.items():
             col_idx = header_indices.get(_norm(dgav_col))
             if col_idx is None:
                 continue
 
             df_col_name = input_colmap.get(dgav_col)
+
+            # Se a coluna não existir no pré-registo → manter default
             if not df_col_name:
-                # coluna não encontrada no pré-registo
-                value = None
-            else:
-                value = row_in.get(df_col_name)
+                continue
+
+            value = row_in.get(df_col_name)
 
             # Converte NaN em None
             if isinstance(value, float) and pd.isna(value):
@@ -263,11 +263,15 @@ def process_pre_to_dgav(uploaded_file) -> Tuple[bytes, str]:
 
             ws.cell(row=excel_row, column=col_idx).value = value
 
-    # 5) Validar colunas obrigatórias (modo 2: qualquer célula vazia)
+    # 5) Validar colunas obrigatórias (modo 2)
     if n_samples > 0:
         _mark_required_empty_columns(ws, header_indices, start_row=start_row, last_row=last_row)
 
-    # 6) Exportar para bytes (sem tocar no disco)
+    # 6) **Cortar linhas extra — impedir defaults abaixo do bloco das amostras**
+    if ws.max_row > last_row:
+        ws.delete_rows(last_row + 1, ws.max_row - last_row)
+
+    # 7) Exportar para bytes
     output = BytesIO()
     wb.save(output)
     output.seek(0)
